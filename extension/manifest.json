@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Kokoro Reader",
+  "version": "0.1.0",
+  "description": "Reads articles aloud with a local Kokoro voice, highlighting each sentence and word as you follow along.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1:51730/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Read this page (Alt+Shift+R)" },
+  "commands": {
+    "toggle-reader": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Start / close the reader on this page"
+    },
+    "play-pause": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "Play / pause"
+    },
+    "next-sentence": {
+      "suggested_key": { "default": "Alt+Shift+Right" },
+      "description": "Skip to next sentence"
+    },
+    "prev-sentence": {
+      "suggested_key": { "default": "Alt+Shift+Left" },
+      "description": "Back one sentence"
+    }
+  }
+}
