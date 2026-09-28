@@ -77,8 +77,8 @@
 
   // The element holding the most paragraph text, with credit flowing up to
   // parents and grandparents so wrapped paragraphs still add up.
-  function findRoot() {
-    const scores = new Map();
+  function findRoot(title) {
+    const scores = new Map(), totals = new Map();
     for (const p of document.querySelectorAll("p")) {
       if (p.closest(SKIP)) continue;
       const len = p.textContent.trim().length;
@@ -87,10 +87,28 @@
       for (let d = 0; el && d < 3; d++, el = el.parentElement, weight /= 2) {
         scores.set(el, (scores.get(el) || 0) + len * weight);
       }
+      for (el = p.parentElement; el; el = el.parentElement) totals.set(el, (totals.get(el) || 0) + len);
     }
     let best = null, bestScore = 0;
     for (const [el, s] of scores) if (s > bestScore) { best = el; bestScore = s; }
-    return best || document.body;
+    if (!best) return document.body;
+
+    // Articles split into sibling sections (every.to guides) make one section
+    // win; climb to an ancestor that holds far more of the page's prose.
+    const total = (el) => totals.get(el) || 0;
+    const top = (el) => el === document.body || el === document.documentElement;
+    let root = best;
+    for (let a = best.parentElement; a && !top(a); a = a.parentElement) {
+      if (total(a) >= 2 * total(root)) root = a;
+    }
+    // Take in the title and any intro between it and the body, unless that
+    // drags in lots of other prose.
+    if (title && !root.contains(title)) {
+      let a = root.parentElement;
+      while (a && !a.contains(title)) a = a.parentElement;
+      if (a && !top(a) && total(a) <= 1.25 * total(root)) root = a;
+    }
+    return root;
   }
 
   function linkDensity(el, textLen) {
@@ -101,7 +119,7 @@
 
   // Reference lists, comment threads, "related posts" and the like, which
   // often live inside the article container.
-  const NOISE = /\b(references?|reflist|footnotes?|comments?|related|share|sharing|social|newsletter|subscribe|signup|promo|advert|ads|sidebar|navbox|breadcrumbs?|toc|metadata|cookies?|consent|gdpr)\b/i;
+  const NOISE = /\b(references?|reflist|footnotes?|comments?|related|share|sharing|social|newsletter|subscribe|signup|email-capture|promo|advert|ads|sidebar|navbox|breadcrumbs?|toc|metadata|cookies?|consent|gdpr)\b/i;
 
   function noisy(el, root) {
     for (let a = el; a && a !== root; a = a.parentElement) {
@@ -161,7 +179,8 @@
 
   // Each block is a list of top-level nodes, usually a single element.
   function collectBlocks() {
-    const root = findRoot();
+    const h1 = [...document.querySelectorAll("h1")].find((h) => visible(h) && !h.closest(SKIP));
+    const root = findRoot(h1);
     const blocks = [];
     let covered = 0;
     for (const el of root.querySelectorAll(BLOCKS)) {
@@ -179,9 +198,12 @@
       blocks.push(...brBlocks(container));
     }
 
+    // Breadcrumbs, kickers and dates above the title are not the article.
+    const at = h1 ? blocks.findIndex((b) => b[0] === h1) : -1;
+    if (at > 0) blocks.splice(0, at);
+
     // The title usually sits outside the body container; read it first.
     const first = blocks[0]?.[0];
-    const h1 = [...document.querySelectorAll("h1")].find((h) => visible(h) && !h.closest(SKIP));
     if (h1 && first && !blocks.some((b) => b.some((n) => n === h1 || n.contains?.(h1))) &&
         (h1.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)) {
       blocks.unshift([h1]);

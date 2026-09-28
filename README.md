@@ -37,8 +37,9 @@ English voices get word-level highlighting; Portuguese voices get sentence-level
 
 ## How it works
 
-- **Extraction**: picks the element with the most paragraph text, collects its
-  headings, paragraphs, list items and quotes, and skips navigation, references,
+- **Extraction**: picks the element with the most paragraph text (widening it
+  when the article is split into sibling sections, and to take in the title and
+  intro), collects its headings, paragraphs, list items and quotes, and skips navigation, references,
   comments, share widgets and cookie banners. Pages without `<p>` (e.g.
   paulgraham.com) are split on double `<br>`.
 - **Sentences** come from `Intl.Segmenter` and are mapped to DOM `Range`s;
