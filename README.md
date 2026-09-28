@@ -26,13 +26,21 @@ choose `extension/`. Pin it from the puzzle menu.
 | Action | How |
 | --- | --- |
 | Start / close on a page | Toolbar icon or **Alt+Shift+R** |
-| Play / pause | ▶ in the bar or **Alt+Shift+P** |
-| Next / previous sentence | ⏭ ⏮ or **Alt+Shift+→ / ←** |
+| Play / pause | ▶ in the bar, **K**, or **Alt+Shift+P** |
+| Next / previous sentence | ⏭ ⏮, **→ / ←** (or **L / J**), or **Alt+Shift+→ / ←** |
+| Next / previous paragraph | **Shift+→ / ←** |
+| Re-read the sentence | ↺ or **R** (goes to the previous one if the current one just started) |
+| Slower / faster | **- / +** |
 | Jump to any sentence | **Alt+click** it |
 | Start from a spot | Select some text first, or just scroll there; reading starts at the first visible sentence |
-| Back to the voice after scrolling away | **⌖ Follow** |
+| Move the voice to where you scrolled | **H** (reads from the selection or the first visible sentence) |
+| Back to the voice after scrolling away | **⌖ Follow** or **F** |
+| List the shortcuts | **?** in the bar or on the keyboard |
 
-Voice and speed persist. Shortcuts can be changed at `chrome://extensions/shortcuts`.
+Voice and speed persist. The single-key shortcuts only work while the bar is
+open and you're not typing in a field; they take priority over the page's own
+shortcuts. The **Alt+Shift** ones are global Chrome commands and can be changed
+at `chrome://extensions/shortcuts`.
 English voices get word-level highlighting; Portuguese voices get sentence-level only.
 
 ## How it works

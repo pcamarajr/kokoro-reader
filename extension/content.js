@@ -22,6 +22,7 @@
   const MAX_SENTENCE = 350;        // longer sentences are split at commas
   const MIN_SENTENCE = 12;         // shorter fragments merge into the previous one
   const USER_SCROLL_GRACE = 6000;  // ms after a manual scroll before auto-follow resumes
+  const REPLAY_GRACE = 1.5;        // s into a sentence before R restarts it instead of going back
 
   const BLOCKS = "h1,h2,h3,h4,h5,h6,p,li,blockquote,figcaption,dt,dd";
   const SKIP = [
@@ -353,8 +354,39 @@
   }
 
   function markUserScroll() { userScrolledAt = Date.now(); if (ui) ui.follow.hidden = false; }
-  function onKeyScroll(e) {
+
+  // Single-key shortcuts while the bar is open. Typing in the page (or in the
+  // bar's selects) and modifier chords are left alone.
+  function editable(e) {
+    const t = e.composedPath()[0];
+    return t instanceof Element &&
+      (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.getAttribute("role") === "textbox");
+  }
+
+  function onKey(e) {
     if (["PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End", " "].includes(e.key)) markUserScroll();
+    if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || editable(e)) return;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const action = {
+      k: togglePause,
+      ArrowLeft: () => e.shiftKey ? prevParagraph() : jump(index - 1, true),
+      j: () => e.shiftKey ? prevParagraph() : jump(index - 1, true),
+      ArrowRight: () => e.shiftKey ? nextParagraph() : jump(index + 1, true),
+      l: () => e.shiftKey ? nextParagraph() : jump(index + 1, true),
+      r: replay,
+      h: () => jump(startIndex(), true),
+      f: () => { userScrolledAt = 0; follow(true); },
+      "-": () => stepSpeed(-1),
+      "_": () => stepSpeed(-1),
+      "+": () => stepSpeed(1),
+      "=": () => stepSpeed(1),
+      "?": toggleHelp,
+      Escape: ui && !ui.help.hidden ? toggleHelp : null,
+    }[k];
+    if (!action) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.repeat) action();
   }
 
   // Alt+click on any sentence jumps there.
@@ -516,6 +548,37 @@
     playAt(i);
   }
 
+  // Restart the sentence being read; right after one begins, the one before
+  // it is what you missed.
+  function replay() {
+    const elapsed = current ? ctx.currentTime - current.t0 : 0;
+    jump(elapsed > REPLAY_GRACE || index >= sentences.length ? index : index - 1, true);
+  }
+
+  function nextParagraph() {
+    const at = Math.min(index, sentences.length - 1);
+    const i = sentences.findIndex((s, j) => j > at && s.block !== sentences[at].block);
+    jump(i < 0 ? sentences.length - 1 : i, true);
+  }
+
+  // Back to the start of this paragraph, or of the previous one if already there.
+  function prevParagraph() {
+    const blockStart = (j) => { while (j > 0 && sentences[j - 1].block === sentences[j].block) j--; return j; };
+    const at = Math.min(index, sentences.length - 1);
+    const start = blockStart(at);
+    jump(start < at ? start : blockStart(Math.max(0, start - 1)), true);
+  }
+
+  function stepSpeed(dir) {
+    let i = SPEEDS.indexOf(settings.speed);
+    if (i < 0) i = SPEEDS.findIndex((s) => s >= settings.speed);
+    const next = SPEEDS[Math.min(Math.max(0, i + dir), SPEEDS.length - 1)];
+    if (next === settings.speed) return;
+    changeSetting("speed", next);
+    if (ui) ui.speed.value = next;
+    flash(`Speed ${next}× from the next sentence`);
+  }
+
   function finish() {
     stopSource();
     highlight("kr-sentence", null);
@@ -566,6 +629,23 @@
     .meta { opacity: .75; font-variant-numeric: tabular-nums; padding: 0 4px; white-space: nowrap; }
     .status { flex-basis: 100%; text-align: center; font-size: 12px; color: #ffd60a; }
     .status:empty { display: none; }
+    .help {
+      flex-basis: 100%; display: grid; grid-template-columns: auto auto; gap: 5px 14px;
+      justify-content: center; padding: 6px 4px 2px; font-size: 12px;
+    }
+    .help dt { text-align: right; white-space: nowrap; }
+    .help dd { margin: 0; opacity: .85; }
+    kbd {
+      font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      padding: 2px 5px; border-radius: 4px; background: rgba(255,255,255,.14);
+    }
+    .hint {
+      margin-left: 6px; padding: 1px 4px; font-size: 10px; line-height: 1.3;
+      vertical-align: 1px; opacity: .7; background: rgba(255,255,255,.12);
+    }
+    .play .hint { background: rgba(0,0,0,.12); opacity: .8; }
+    .speed { display: inline-flex; align-items: center; }
+    .speed .hint { margin: 0 2px 0 5px; }
     [hidden] { display: none !important; }
   `;
 
@@ -591,36 +671,70 @@
     voice.value = settings.voice;
     voice.onchange = () => changeSetting("voice", voice.value);
 
-    const speed = el("select", { title: "Speed" });
+    const speed = el("select", { title: "Speed (- / +)" });
     for (const s of SPEEDS) speed.append(el("option", { value: s, textContent: s + "×" }));
     speed.value = settings.speed;
     speed.onchange = () => changeSetting("speed", parseFloat(speed.value));
 
-    const btn = (text, title, fn, cls = "") => el("button", { textContent: text, title, onclick: fn, className: cls });
-    const play = btn("▶", "Play / pause (Alt+Shift+P)", togglePause, "play");
-    const followBtn = btn("⌖ Follow", "Scroll back to the voice", () => { userScrolledAt = 0; follow(true); });
+    // The icon sits in its own span so render() can swap it without losing the key hint.
+    const hint = (key) => el("kbd", { className: "hint", textContent: key });
+    const btn = (icon, title, fn, key = "", cls = "") => el("button", { title, onclick: fn, className: cls },
+      key ? [el("span", { textContent: icon }), hint(key)] : [icon]);
+    const play = btn("▶", "Play / pause (K)", togglePause, "K", "play");
+    const followBtn = btn("⌖ Follow", "Scroll back to the voice (F)", () => { userScrolledAt = 0; follow(true); }, "F");
     followBtn.hidden = true;
     const meta = el("span", { className: "meta" });
     const statusEl = el("div", { className: "status" });
 
+    const help = el("dl", { className: "help", hidden: true });
+    for (const [keys, what] of SHORTCUTS) {
+      const dt = el("dt");
+      keys.forEach((k, i) => { if (i) dt.append(" "); dt.append(el("kbd", { textContent: k })); });
+      help.append(dt, el("dd", { textContent: what }));
+    }
+
     const bar = el("div", { className: "bar" }, [
-      btn("⏮", "Previous sentence (Alt+Shift+←)", () => jump(index - 1, true)),
+      btn("⏮", "Previous sentence (← or J)", () => jump(index - 1, true), "J"),
       play,
-      btn("⏭", "Next sentence (Alt+Shift+→)", () => jump(index + 1, true)),
-      speed, voice, meta, followBtn,
+      btn("⏭", "Next sentence (→ or L)", () => jump(index + 1, true), "L"),
+      btn("↺", "Re-read sentence (R)", replay, "R"),
+      el("span", { className: "speed", title: "Slower / faster (- / +)" }, [speed, hint("−+")]),
+      voice, meta, followBtn,
+      btn("?", "Keyboard shortcuts (?)", toggleHelp),
       btn("✕", "Close reader (Alt+Shift+R)", close),
-      statusEl,
+      statusEl, help,
     ]);
     shadow.append(bar);
     document.documentElement.append(host);
-    return { host, play, meta, status: statusEl, follow: followBtn };
+    return { host, play, meta, speed, status: statusEl, follow: followBtn, help };
   }
+
+  const SHORTCUTS = [
+    [["K"], "Play / pause"],
+    [["←", "→"], "Previous / next sentence (also J / L)"],
+    [["⇧←", "⇧→"], "Previous / next paragraph"],
+    [["R"], "Re-read the sentence (the previous one if it just started)"],
+    [["H"], "Read from here: the selection or first visible sentence"],
+    [["F"], "Scroll back to the voice"],
+    [["-", "+"], "Slower / faster"],
+    [["⌥", "click"], "Read from the clicked sentence"],
+    [["⌥⇧R"], "Close the reader"],
+    [["?"], "Show / hide this list"],
+  ];
+
+  function toggleHelp() { if (ui) ui.help.hidden = !ui.help.hidden; }
 
   function status(text) { if (ui) ui.status.textContent = text; }
 
+  // A short-lived notice that doesn't wipe a real status message set meanwhile.
+  function flash(text) {
+    status(text);
+    setTimeout(() => { if (ui?.status.textContent === text) status(""); }, 1500);
+  }
+
   function render() {
     if (!ui) return;
-    ui.play.textContent = paused ? "▶" : "❚❚";
+    ui.play.firstChild.textContent = paused ? "▶" : "❚❚";
     const n = sentences.length;
     const cps = playedSecs > 20 ? playedChars / playedSecs : 14.5 * settings.speed;
     let left = 0;
@@ -639,7 +753,7 @@
     ui = buildUI();
     addEventListener("wheel", markUserScroll, { passive: true });
     addEventListener("touchmove", markUserScroll, { passive: true });
-    addEventListener("keydown", onKeyScroll, true);
+    addEventListener("keydown", onKey, true);
     addEventListener("click", onClick, true);
     rafId = requestAnimationFrame(tick);
 
@@ -661,7 +775,7 @@
     cancelAnimationFrame(rafId);
     removeEventListener("wheel", markUserScroll);
     removeEventListener("touchmove", markUserScroll);
-    removeEventListener("keydown", onKeyScroll, true);
+    removeEventListener("keydown", onKey, true);
     removeEventListener("click", onClick, true);
     document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet);
     ui?.host.remove();
