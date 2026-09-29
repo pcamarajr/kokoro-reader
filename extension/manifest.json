@@ -6,6 +6,7 @@
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["http://127.0.0.1:51730/*"],
   "background": { "service_worker": "background.js" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
   "action": { "default_title": "Read this page (Alt+Shift+R)" },
   "commands": {
     "toggle-reader": {

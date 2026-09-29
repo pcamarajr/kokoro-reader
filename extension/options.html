@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Kokoro Reader preferences</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 640px; margin: 32px auto; padding: 0 16px; }
+    h1 { font-size: 20px; }
+    h2 { font-size: 15px; margin: 28px 0 8px; }
+    label.row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+    label.row span { flex: 1; }
+    .hint { opacity: .65; font-size: 12px; margin: 0 0 6px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 6px 8px 6px 0; }
+    th { font-weight: 600; font-size: 12px; opacity: .7; }
+    select, button { font: inherit; padding: 4px 6px; }
+    #saved { opacity: 0; transition: opacity .3s; margin-left: 8px; }
+    #saved.on { opacity: .7; }
+  </style>
+</head>
+<body>
+  <h1>Kokoro Reader <span id="saved">Saved</span></h1>
+
+  <h2>When an article starts</h2>
+  <label class="row"><input type="checkbox" id="autoLanguage"><span>Detect the article's language</span></label>
+  <label class="row"><input type="checkbox" id="autoGender"><span>Pick the voice's gender from the author's name</span></label>
+  <p class="hint">The gender comes from a built-in list of common first names, so it can be wrong.
+    Unisex or unfamiliar names, and articles without a byline, use the default gender.</p>
+
+  <label class="row"><span>Default language (when detection is unsure)</span><select id="fallbackLanguage"></select></label>
+  <label class="row"><span>Default gender (when the author is unknown)</span>
+    <select id="fallbackGender"><option value="female">Female</option><option value="male">Male</option></select></label>
+
+  <h2>Preferred voices</h2>
+  <table>
+    <thead><tr><th>Language</th><th>Female</th><th>Male</th></tr></thead>
+    <tbody id="voices"></tbody>
+  </table>
+  <p class="hint">Choosing a voice in the reader's bar updates this list too.</p>
+
+  <script src="voices.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

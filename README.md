@@ -37,11 +37,17 @@ choose `extension/`. Pin it from the puzzle menu.
 | Back to the voice after scrolling away | **⌖ Follow** or **F** |
 | List the shortcuts | **?** in the bar or on the keyboard |
 
+Speed persists. Voices and languages are set on the preferences page (**⚙** in
+the bar, or the extension's Options): whether to detect the language and the
+author's gender when an article starts, a default language and gender for when
+either is unclear, and one preferred voice per language and gender, with a ▶
+preview. Picking a voice in the bar saves it there too.
+
 Voice and speed persist. The single-key shortcuts only work while the bar is
 open and you're not typing in a field; they take priority over the page's own
 shortcuts. The **Alt+Shift** ones are global Chrome commands and can be changed
 at `chrome://extensions/shortcuts`.
-English voices get word-level highlighting; Portuguese voices get sentence-level only.
+English voices get word-level highlighting; the other languages (Português, Español, Français, Italiano) get sentence-level only.
 
 ## How it works
 
@@ -50,6 +56,12 @@ English voices get word-level highlighting; Portuguese voices get sentence-level
   intro), collects its headings, paragraphs, list items and quotes, and skips navigation, references,
   comments, share widgets and cookie banners. Pages without `<p>` (e.g.
   paulgraham.com) are split on double `<br>`.
+- **Language and voice**: Chrome's language detector reads the start of the
+  article (the page's `lang` is the runner-up, your default the last resort).
+  The author comes from `<meta name="author">`, JSON-LD, `rel=author` or the
+  byline, and a built-in list of common first names guesses the gender. It is a
+  guess: unisex or unknown names and bylines like "Staff" use your default
+  gender. The bar shows what was chosen and why, and you can override it there.
 - **Sentences** come from `Intl.Segmenter` and are mapped to DOM `Range`s;
   highlighting uses the CSS Custom Highlight API, so the page DOM is untouched.
 - **Audio**: the service worker asks the server for one sentence at a time,

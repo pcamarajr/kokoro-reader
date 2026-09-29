@@ -41,8 +41,8 @@ MAX_TEXT = 2000
 # to natural reading rhythm.
 PAUSE = {".": 0.30, "!": 0.30, "?": 0.30, ":": 0.25, ";": 0.22, ",": 0.12}
 DEFAULT_PAUSE = 0.35          # headings and list items usually lack punctuation
-SILENCE_THRESHOLD = 0.01
-KEEP_MARGIN = 0.03
+SILENCE_THRESHOLD = 0.006     # soft onsets (a leading vowel) sit close to this
+KEEP_MARGIN = 0.08
 
 _model_lock = threading.Lock()
 _pipelines = {}

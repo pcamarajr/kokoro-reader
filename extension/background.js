@@ -5,7 +5,7 @@
 const SERVER = "http://127.0.0.1:51730";
 
 async function inject(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["voices.js", "names.js", "content.js"] });
 }
 
 async function toggle(tab) {
@@ -40,6 +40,18 @@ async function post(path, body) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg.type === "detect-language") {
+    // Chrome's built-in detector; not reachable from every extension context.
+    chrome.i18n.detectLanguage(String(msg.body?.text || ""))
+      .then((r) => reply({ ok: true, data: { reliable: r.isReliable, languages: r.languages } }))
+      .catch((err) => reply({ ok: false, error: String(err.message || err) }));
+    return true;
+  }
+  if (msg.type === "open-options") {
+    chrome.runtime.openOptionsPage();
+    reply({ ok: true });
+    return;
+  }
   if (msg.type === "speak" || msg.type === "warm") {
     post("/" + msg.type, msg.body)
       .then((data) => reply({ ok: true, data }))

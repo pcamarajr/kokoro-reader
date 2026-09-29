@@ -10,13 +10,6 @@
   window.__kokoroReader = true;
 
   // --- constants ---------------------------------------------------------
-  const VOICES = {
-    "US female": ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_aoede", "af_kore", "af_nova"],
-    "US male": ["am_michael", "am_adam", "am_eric", "am_liam", "am_onyx", "am_puck", "am_fenrir"],
-    "UK female": ["bf_emma", "bf_isabella", "bf_alice", "bf_lily"],
-    "UK male": ["bm_george", "bm_fable", "bm_daniel", "bm_lewis"],
-    "Português (BR)": ["pf_dora", "pm_alex", "pm_santa"],
-  };
   const SPEEDS = [0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2];
   const PREFETCH = 3;              // sentences synthesized ahead of playback
   const MAX_SENTENCE = 350;        // longer sentences are split at commas
@@ -37,6 +30,8 @@
 
   // --- state -------------------------------------------------------------
   let settings = { voice: "af_heart", speed: 1.1 };
+  let prefs = KR.DEFAULTS;
+  let lang = "en", gender = "female";   // what the current voice was chosen for
   let sentences = [];   // {text, block, start, end, range, nodes}
   let index = 0;
   let active = false;
@@ -268,14 +263,13 @@
     return out;
   }
 
-  function buildSentences() {
-    const lang = document.documentElement.lang || "en";
+  function buildSentences(blocks, lang) {
     let segmenter;
     try { segmenter = new Intl.Segmenter(lang, { granularity: "sentence" }); }
     catch { segmenter = new Intl.Segmenter("en", { granularity: "sentence" }); }
 
     const out = [];
-    for (const block of collectBlocks()) {
+    for (const block of blocks) {
       const { nodes, text } = textNodes(block);
       if (!nodes.length) continue;
       const spans = [];
@@ -319,6 +313,85 @@
       cursor = at + needle.length;
     }
     return mapped;
+  }
+
+  // --- language, author, voice -------------------------------------------
+  const clean = (s) => s.replace(/\s+/g, " ").trim();
+
+  // The page's declared language is often wrong (or just "en"), so the text
+  // itself decides when Chrome is sure; the declaration is the runner-up.
+  async function detectLanguage(blocks) {
+    const sample = clean(blocks.slice(0, 15).map((b) => b.map((n) => n.textContent).join(" ")).join(" ")).slice(0, 1500);
+    let code = null;
+    if (sample.length > 80) {
+      const r = await send("detect-language", { text: sample }).catch(() => null);
+      if (r?.reliable && r.languages?.[0]) code = r.languages[0].language.split("-")[0];
+    }
+    if (code && KR.LANGUAGES[code]) return { lang: code };
+    if (code) return { lang: prefs.fallbackLanguage, unsupported: code };
+    const declared = (document.documentElement.lang || "").toLowerCase().split("-")[0];
+    return { lang: KR.LANGUAGES[declared] ? declared : prefs.fallbackLanguage };
+  }
+
+  const PERSON_TYPES = /^(Person)$/i;
+  const NOT_A_PERSON = /\b(team|staff|editorial|redação|redacao|equipe|newsroom|reporters?|news|inc|ltd|llc|agency|agência|admin)\b/i;
+
+  function ldAuthors(node, out = []) {
+    if (!node || typeof node !== "object") return out;
+    if (Array.isArray(node)) { node.forEach((n) => ldAuthors(n, out)); return out; }
+    if (node.author) {
+      for (const a of [].concat(node.author)) {
+        if (typeof a === "string") out.push(a);
+        else if (a && (!a["@type"] || PERSON_TYPES.test([].concat(a["@type"])[0])) && a.name) out.push(a.name);
+      }
+    }
+    if (node["@graph"]) ldAuthors(node["@graph"], out);
+    return out;
+  }
+
+  // The article's first author: metadata first, then structured data, then the
+  // byline on the page. Returns null when nothing looks like a person's name.
+  function findAuthor() {
+    const candidates = [];
+    for (const sel of ['meta[name="author"]', 'meta[property="article:author"]', 'meta[name="parsely-author"]',
+      'meta[name="dc.creator"]', 'meta[name="sailthru.author"]']) {
+      for (const m of document.querySelectorAll(sel)) candidates.push(m.content);
+    }
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try { candidates.push(...ldAuthors(JSON.parse(script.textContent))); } catch {}
+    }
+    for (const a of document.querySelectorAll(
+      '[rel~="author"], [itemprop="author"], [class*="byline"], [class*="author-name"], [class*="authorName"], .author')) {
+      if (!a.closest(SKIP) || a.closest("header, article")) candidates.push(a.getAttribute("content") || a.textContent);
+    }
+    for (const raw of candidates) {
+      if (typeof raw !== "string") continue;
+      // "By Ana Silva and Bob Lee", "Ana Silva | Feb 3", "Por Ana Silva, editora".
+      const name = clean(raw).replace(/^(by|por|par|de|di)\s+/i, "").split(/\s*(?:,|;|\||·|•|—|–| and | e | y | et | & |\n)\s*/i)[0];
+      if (/^https?:/i.test(name) || name.length < 3 || name.length > 60) continue;
+      if (!/^\p{L}[\p{L}'.\- ]+$/u.test(name) || NOT_A_PERSON.test(name)) continue;
+      return name;
+    }
+    return null;
+  }
+
+  // Language from the text, gender from the author; each falls back to the
+  // preference. Returns what to say about it too.
+  async function chooseForArticle(blocks) {
+    let notes = [];
+    let picked = { lang: prefs.fallbackLanguage };
+    if (prefs.autoLanguage) {
+      picked = await detectLanguage(blocks);
+      if (picked.unsupported) notes.push(`"${picked.unsupported}" isn't available, using ${KR.LANGUAGES[picked.lang].label}`);
+    }
+    let g = prefs.fallbackGender;
+    if (prefs.autoGender) {
+      const author = findAuthor();
+      const guessed = author && KRNames.guess(author, picked.lang);
+      if (guessed) { g = guessed; notes.push(`${author}: ${guessed} voice`); }
+      else if (author) notes.push(`${author}: unsure, using the default voice`);
+    }
+    return { lang: picked.lang, gender: g, notes };
   }
 
   // --- highlighting & scrolling -----------------------------------------
@@ -481,7 +554,7 @@
       clearTimeout(slow);
     }
     if (gen !== generation) return;
-    status("");
+    if (ui?.status.textContent === "Synthesizing…") status("");
 
     const src = ctx.createBufferSource();
     src.buffer = c.buffer;
@@ -598,9 +671,21 @@
       : "Error: " + msg);
   }
 
+  // Picking a voice by hand also makes it the preferred one for its language
+  // and gender; switching language only loads that language's preferred voice.
+  function chooseVoice(voice, remember = true) {
+    lang = KR.langOf(voice);
+    gender = KR.genderOf(voice);
+    if (remember) {
+      prefs.voices[lang] = { ...prefs.voices[lang], [gender]: voice };
+      chrome.storage.sync.set({ voices: prefs.voices });
+    }
+    changeSetting("voice", voice);
+  }
+
   function changeSetting(key, value) {
     settings[key] = value;
-    chrome.storage.sync.set({ [key]: value });
+    if (key === "speed") chrome.storage.sync.set({ speed: value });
     // Keep the sentence being spoken; re-synthesize everything after it.
     for (const k of [...cache.keys()]) if (k !== index) cache.delete(k);
     prefetch();
@@ -611,7 +696,7 @@
   const CSS_UI = `
     :host { all: initial; }
     .bar {
-      position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+      position: fixed; left: 0; right: 0; bottom: 20px; margin: 0 auto; width: max-content;
       z-index: 2147483647; display: flex; align-items: center; gap: 6px;
       padding: 8px 10px; border-radius: 14px;
       background: rgba(28, 28, 30, 0.92); color: #f5f5f7;
@@ -662,14 +747,29 @@
     style.replaceSync(CSS_UI);
     shadow.adoptedStyleSheets = [style];
 
-    const voice = el("select", { title: "Voice" });
-    for (const [group, names] of Object.entries(VOICES)) {
-      const og = el("optgroup", { label: group });
-      for (const n of names) og.append(el("option", { value: n, textContent: n.split("_")[1] }));
-      voice.append(og);
+    const language = el("select", { title: "Language" });
+    for (const [code, { label }] of Object.entries(KR.LANGUAGES)) {
+      language.append(el("option", { value: code, textContent: label }));
     }
-    voice.value = settings.voice;
-    voice.onchange = () => changeSetting("voice", voice.value);
+    const voice = el("select", { title: "Voice" });
+    const fillVoices = () => {
+      voice.replaceChildren();
+      for (const [g, names] of Object.entries(KR.LANGUAGES[lang].voices)) {
+        if (!names.length) continue;
+        const og = el("optgroup", { label: g[0].toUpperCase() + g.slice(1) });
+        for (const n of names) og.append(el("option", { value: n, textContent: KR.voiceLabel(n) }));
+        voice.append(og);
+      }
+      voice.value = settings.voice;
+    };
+    language.value = lang;
+    fillVoices();
+    voice.onchange = () => chooseVoice(voice.value);
+    language.onchange = () => {
+      lang = language.value;
+      chooseVoice(KR.pickVoice(prefs, lang, gender), false);
+      fillVoices();
+    };
 
     const speed = el("select", { title: "Speed (- / +)" });
     for (const s of SPEEDS) speed.append(el("option", { value: s, textContent: s + "×" }));
@@ -699,7 +799,8 @@
       btn("⏭", "Next sentence (→ or L)", () => jump(index + 1, true), "L"),
       btn("↺", "Re-read sentence (R)", replay, "R"),
       el("span", { className: "speed", title: "Slower / faster (- / +)" }, [speed, hint("−+")]),
-      voice, meta, followBtn,
+      language, voice, meta, followBtn,
+      btn("⚙", "Voice and language preferences", () => send("open-options").catch(() => {})),
       btn("?", "Keyboard shortcuts (?)", toggleHelp),
       btn("✕", "Close reader (Alt+Shift+R)", close),
       statusEl, help,
@@ -727,9 +828,9 @@
   function status(text) { if (ui) ui.status.textContent = text; }
 
   // A short-lived notice that doesn't wipe a real status message set meanwhile.
-  function flash(text) {
+  function flash(text, ms = 1500) {
     status(text);
-    setTimeout(() => { if (ui?.status.textContent === text) status(""); }, 1500);
+    setTimeout(() => { if (ui?.status.textContent === text) status(""); }, ms);
   }
 
   function render() {
@@ -746,8 +847,14 @@
   // --- lifecycle -----------------------------------------------------------
   async function open() {
     active = true;
-    settings = { ...settings, ...(await chrome.storage.sync.get(["voice", "speed"])) };
-    sentences = buildSentences();
+    prefs = await KR.loadPrefs();
+    const blocks = collectBlocks();
+    const choice = await chooseForArticle(blocks);
+    if (!active) return;   // closed while detecting
+    lang = choice.lang;
+    gender = choice.gender;
+    settings = { voice: KR.pickVoice(prefs, lang, gender), speed: prefs.speed };
+    sentences = buildSentences(blocks, lang);
     ctx = new AudioContext();
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     ui = buildUI();
@@ -762,6 +869,7 @@
       return status("Couldn't find article text on this page.");
     }
     send("warm", { voice: settings.voice }).catch(() => {});
+    flash([KR.LANGUAGES[lang].label, ...choice.notes].join(" · "), 5000);
     paused = false;
     userScrolledAt = Date.now();   // don't yank the page on start
     playAt(startIndex());
