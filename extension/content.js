@@ -87,14 +87,16 @@
     }
     let best = null, bestScore = 0;
     for (const [el, s] of scores) if (s > bestScore) { best = el; bestScore = s; }
-    if (!best) return document.body;
+    if (!best) return [document.body, document.body];
 
     // Articles split into sibling sections (every.to guides) make one section
     // win; climb to an ancestor that holds far more of the page's prose.
     const total = (el) => totals.get(el) || 0;
     const top = (el) => el === document.body || el === document.documentElement;
+    // Never past the post's <article>, or comments and recommendations win.
+    const article = best.closest("article");
     let root = best;
-    for (let a = best.parentElement; a && !top(a); a = a.parentElement) {
+    for (let a = best.parentElement; a && !top(a) && root !== article; a = a.parentElement) {
       if (total(a) >= 2 * total(root)) root = a;
     }
     // Take in the title and any intro between it and the body, unless that
@@ -104,7 +106,7 @@
       while (a && !a.contains(title)) a = a.parentElement;
       if (a && !top(a) && total(a) <= 1.25 * total(root)) root = a;
     }
-    return root;
+    return [root, best];
   }
 
   function linkDensity(el, textLen) {
@@ -114,11 +116,12 @@
   }
 
   // Reference lists, comment threads, "related posts" and the like, which
-  // often live inside the article container.
+  // often live inside the article container. Ancestors of the densest prose
+  // are exempt: Substack wraps every post in <article class="newsletter-post">.
   const NOISE = /\b(references?|reflist|footnotes?|comments?|related|share|sharing|social|newsletter|subscribe|signup|email-capture|promo|advert|ads|sidebar|navbox|breadcrumbs?|toc|metadata|cookies?|consent|gdpr)\b/i;
 
-  function noisy(el, root) {
-    for (let a = el; a && a !== root; a = a.parentElement) {
+  function noisy(el, root, core) {
+    for (let a = el; a && a !== root && !a.contains(core); a = a.parentElement) {
       if (NOISE.test((a.id || "") + " " + (a.getAttribute("class") || ""))) return true;
     }
     return false;
@@ -175,14 +178,16 @@
 
   // Each block is a list of top-level nodes, usually a single element.
   function collectBlocks() {
-    const h1 = [...document.querySelectorAll("h1")].find((h) => visible(h) && !h.closest(SKIP));
-    const root = findRoot(h1);
+    // Skip text-less h1s such as Substack's image wordmark in the site header.
+    const h1 = [...document.querySelectorAll("h1")]
+      .find((h) => visible(h) && !h.closest(SKIP) && h.textContent.trim().length > 1);
+    const [root, core] = findRoot(h1);
     const blocks = [];
     let covered = 0;
     for (const el of root.querySelectorAll(BLOCKS)) {
       if (el.closest(SKIP) || el.querySelector(BLOCKS)) continue;   // take the innermost block
       const text = el.textContent.replace(/\s+/g, " ").trim();
-      if (text.length < 2 || !visible(el) || noisy(el, root)) continue;
+      if (text.length < 2 || !visible(el) || noisy(el, root, core)) continue;
       if (text.length < 120 && linkDensity(el, text.length) > 0.8) continue;  // menus, tag lists
       blocks.push([el]);
       covered += text.length;
